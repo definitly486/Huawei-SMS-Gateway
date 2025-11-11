@@ -16,6 +16,8 @@ MainWindow::~MainWindow()
 void MainWindow::on_pushButton_clicked()
 {
 
+    system("doas service ipfw stop");
+
     // Очищаем содержимое текстового поля
     ui->textEdit->clear();
 
@@ -34,6 +36,8 @@ void MainWindow::on_pushButton_clicked()
 
     // Стартуем процесс
     m_process.start();
+
+    system("doas service ipfw start");
 
 }
 
