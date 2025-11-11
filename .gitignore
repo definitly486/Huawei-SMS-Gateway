@@ -1,4 +1,5 @@
 /build/*
 /.qmake.stash
 /Makefile
-/huaweismsgateway 
+/huaweismsgateway
+/modem_sms
