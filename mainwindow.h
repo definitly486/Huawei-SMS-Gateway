@@ -1,6 +1,6 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
-
+#include <QProcess>
 #include <QMainWindow>
 
 QT_BEGIN_NAMESPACE
@@ -22,5 +22,6 @@ private slots:
 
 private:
     Ui::MainWindow *ui;
+    QProcess m_process;           // Теперь m_process доступен в конструкторах и слотах
 };
 #endif // MAINWINDOW_H

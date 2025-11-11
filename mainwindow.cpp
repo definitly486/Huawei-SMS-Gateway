@@ -16,7 +16,24 @@ MainWindow::~MainWindow()
 void MainWindow::on_pushButton_clicked()
 {
 
+    // Очищаем содержимое текстового поля
+    ui->textEdit->clear();
 
+    // Настраиваем процесс
+    m_process.setProgram("get_sms");     // Имя программы
+    m_process.setArguments(QStringList()); // Аргументы (оставляем пустой список)
+
+    // Читаем стандартный вывод
+    QObject::connect(&m_process, &QProcess::readyReadStandardOutput,
+                     [&]()
+                     {
+                         // Чтение данных из стандартного потока вывода
+                         auto data = m_process.readAllStandardOutput().trimmed();
+                         ui->textEdit->append(data); // Выводим полученные данные в TextEdit
+                     });
+
+    // Стартуем процесс
+    m_process.start();
 
 }
 
