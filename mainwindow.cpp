@@ -308,7 +308,9 @@ void MainWindow::on_pushButton_clicked()
     system("doas service ipfw stop");
 
     if (login(u.data(), p.data())) {
-        QMessageBox::information(this, "Login", "Успешный вход!");
+        // Remove the success message box
+        // QMessageBox::information(this, "Login", "Успешный вход!");
+        
         char *sms = ListSmsIn();
         if (sms) {
             // Парсим XML и отображаем SMS
