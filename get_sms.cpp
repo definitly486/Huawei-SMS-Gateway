@@ -1,3 +1,4 @@
+// clang++  -L/usr/local/lib    ./get_sms.cpp -lcurl -lssl -lcrypto -lstdc++  -ltinyxml2   -w -std=c++17 -o get_sms 
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
