@@ -274,6 +274,9 @@ QString MainWindow::parseSmsXml(const char *xmlData)
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(nullptr)
 {
+    // Устанавливаем иконку
+    setWindowIcon(QIcon(":/resources/resources/sms.png"));  // Убедитесь, что путь правильный
+
     QWidget *w = new QWidget;
     QVBoxLayout *lay = new QVBoxLayout(w);
 

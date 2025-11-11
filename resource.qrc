@@ -1,5 +1,5 @@
 <RCC>
-  <qresource prefix="/icons">
- <file>icons/sms.png</file>
+  <qresource prefix="/resources">
+ <file>resources/sms.png</file>
   </qresource>
 </RCC>
