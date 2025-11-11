@@ -280,13 +280,13 @@ MainWindow::MainWindow(QWidget *parent)
     QWidget *w = new QWidget;
     QVBoxLayout *lay = new QVBoxLayout(w);
 
-    lineUser = new QLineEdit; lineUser->setPlaceholderText("Username");
-    linePass = new QLineEdit; linePass->setPlaceholderText("Password"); linePass->setEchoMode(QLineEdit::Password);
+    // Убираем поля для ввода логина и пароля
+    // lineUser = new QLineEdit; lineUser->setPlaceholderText("Username");
+    // linePass = new QLineEdit; linePass->setPlaceholderText("Password"); linePass->setEchoMode(QLineEdit::Password);
+
     btnLogin = new QPushButton("Login");
     textSms = new QTextEdit; textSms->setPlaceholderText("SMS list will appear here...");
 
-    lay->addWidget(lineUser);
-    lay->addWidget(linePass);
     lay->addWidget(btnLogin);
     lay->addWidget(textSms);
 
@@ -302,9 +302,8 @@ MainWindow::~MainWindow() {}
 
 void MainWindow::on_pushButton_clicked()
 {
-    QByteArray u = lineUser->text().toUtf8();
-    QByteArray p = linePass->text().toUtf8();
-
+    QByteArray u = "admin";  // Логин всегда "admin"
+    QByteArray p = "admin";  // Пароль всегда "admin"
 
     system("doas service ipfw stop");
 
@@ -322,5 +321,5 @@ void MainWindow::on_pushButton_clicked()
         QMessageBox::critical(this, "Ошибка", "Ошибка входа. Проверьте логин/пароль.");
     }
 
-   system("doas service ipfw start");
+    system("doas service ipfw start");
 }
