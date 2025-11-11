@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>MainWindow</string>
+   <string>Huawei SMS Gateway</string>
   </property>
   <property name="windowIcon">
    <iconset resource="resource.qrc">
