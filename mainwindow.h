@@ -12,6 +12,9 @@
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <tinyxml2.h>
+
+using namespace tinyxml2;
 
 #define MODEM "192.168.8.1"  // адрес вашего роутера
 #define BuffSize 10240
@@ -27,6 +30,8 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+     QString parseSmsXml(const char *xmlData);
+
 
 private slots:
     void on_pushButton_clicked();

@@ -3,6 +3,7 @@
 #include <ctime>
 #include <cstring>
 
+
 CURL *MainWindow::ch = nullptr;
 CURLcode MainWindow::res;
 struct curl_slist *MainWindow::headers = nullptr;
@@ -233,6 +234,42 @@ char *MainWindow::ListSmsIn()
     return Buff;
 }
 
+QString MainWindow::parseSmsXml(const char *xmlData)
+{
+    QString result;
+    XMLDocument doc;
+
+    // Парсим XML данные
+    if (doc.Parse(xmlData) != XML_SUCCESS) {
+        return "Ошибка парсинга XML.\n";
+    }
+
+    XMLElement *response = doc.FirstChildElement("response");
+    if (!response) return "Нет тегов <response> в XML.\n";
+
+    XMLElement *messages = response->FirstChildElement("Messages");
+    if (!messages) return "Нет входящих сообщений.\n";
+
+    XMLElement *sms = messages->FirstChildElement("Message");
+    while (sms) {
+        const char *phone = sms->FirstChildElement("Phone") ? sms->FirstChildElement("Phone")->GetText() : "Неизвестно";
+        const char *date = sms->FirstChildElement("Date") ? sms->FirstChildElement("Date")->GetText() : "";
+        const char *content = sms->FirstChildElement("Content") ? sms->FirstChildElement("Content")->GetText() : "";
+
+        // Формируем строку результата
+        result += QString("📱 От: %1\n🕓 Дата: %2\n💬 Сообщение:\n%3\n\n")
+                      .arg(phone)
+                      .arg(date)
+                      .arg(content);
+
+        sms = sms->NextSiblingElement("Message");  // Переход к следующему сообщению
+    }
+
+    if (result.isEmpty()) result = "Нет входящих SMS.";
+    return result;
+}
+
+
 // ---------- GUI ----------
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(nullptr)
@@ -264,10 +301,13 @@ void MainWindow::on_pushButton_clicked()
     if (login(u.data(), p.data())) {
         QMessageBox::information(this, "Login", "Успешный вход!");
         char *sms = ListSmsIn();
-        if (sms)
-            textSms->setText(QString::fromUtf8(sms));
-        else
-            QMessageBox::warning(this, "Ошибка", "Не удалось получить SMS");
+        if (sms) {
+            // Парсим XML и отображаем SMS
+            QString parsedMessages = parseSmsXml(sms);
+            textSms->setText(parsedMessages);
+        } else {
+            QMessageBox::warning(this, "Ошибка", "Не удалось получить SMS.");
+        }
     } else {
         QMessageBox::critical(this, "Ошибка", "Ошибка входа. Проверьте логин/пароль.");
     }
