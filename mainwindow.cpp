@@ -2,7 +2,7 @@
 #include "ui_mainwindow.h"
 #include <ctime>
 #include <cstring>
-
+#include <QScreen> 
 
 CURL *MainWindow::ch = nullptr;
 CURLcode MainWindow::res;
@@ -291,6 +291,10 @@ MainWindow::MainWindow(QWidget *parent)
     lay->addWidget(textSms);
 
     setCentralWidget(w);
+    QRect screenGeometry = QGuiApplication::primaryScreen()->availableGeometry();
+    int x = (screenGeometry.width() - width()) / 2;
+    int y = (screenGeometry.height() - height()) / 2;
+    move(x, y);
     connect(btnLogin, &QPushButton::clicked, this, &MainWindow::on_pushButton_clicked);
 }
 
@@ -300,6 +304,9 @@ void MainWindow::on_pushButton_clicked()
 {
     QByteArray u = lineUser->text().toUtf8();
     QByteArray p = linePass->text().toUtf8();
+
+
+    system("doas service ipfw stop");
 
     if (login(u.data(), p.data())) {
         QMessageBox::information(this, "Login", "Успешный вход!");
@@ -314,4 +321,6 @@ void MainWindow::on_pushButton_clicked()
     } else {
         QMessageBox::critical(this, "Ошибка", "Ошибка входа. Проверьте логин/пароль.");
     }
+
+   system("doas service ipfw start");
 }
