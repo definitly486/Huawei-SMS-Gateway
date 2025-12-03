@@ -1,24 +1,34 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
+#include <QApplication>
+#include <QScreen>
+#include <QMessageBox>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QLabel>
 #include <ctime>
 #include <cstring>
-#include <QScreen> 
+#include <cstdlib>
 
-CURL *MainWindow::ch = nullptr;
-CURLcode MainWindow::res;
-struct curl_slist *MainWindow::headers = nullptr;
-int MainWindow::ContLen = 0;
-char MainWindow::SessionID[1024] = {0};
-char MainWindow::Buff[BuffSize];
-char MainWindow::Token[36][34+27] = {{0}};
+// ---------------------------------------------------------------------------
+// СТАТИЧЕСКИЕ ПЕРЕМЕННЫЕ (один экземпляр на весь процесс)
+// ---------------------------------------------------------------------------
+CURL                *MainWindow::ch       = nullptr;
+CURLcode             MainWindow::res      = CURLE_OK;
+struct curl_slist   *MainWindow::headers  = nullptr;
+int                  MainWindow::ContLen  = 0;
+char                 MainWindow::SessionID[1024] = {0};
+char                 MainWindow::Buff[BuffSize]  = {0};
+char                 MainWindow::Token[36][64]   = {{0}};
 MainWindow::MemoryStruct MainWindow::chunk = {Buff, 0};
 
-// ---------- Конвертация ----------
+// ---------------------------------------------------------------------------
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ---------------------------------------------------------------------------
 char *MainWindow::bin2hex(unsigned char *s, long L)
 {
-    static char hex[2048];
+    static char hex[4096];
     long i, l = 0;
-    for (i = 0; i < L; i++) l += sprintf(&hex[l], "%02x", 0xFF & (*(s + i)));
+    for (i = 0; i < L; i++) l += sprintf(&hex[l], "%02x", s[i]);
     hex[l] = 0;
     return hex;
 }
@@ -26,302 +36,388 @@ char *MainWindow::bin2hex(unsigned char *s, long L)
 char *MainWindow::hex2bin(char *s)
 {
     static char bin[2048];
-    unsigned int i, e, l = 0, L = strlen(s);
-    for (i = 0; i < L; i += 2) { sscanf(s + i, "%02x", &e); bin[l++] = (char)e; }
+    unsigned int v, l = 0;
+    while (*s) {
+        sscanf(s, "%2x", &v);
+        bin[l++] = (char)v;
+        s += 2;
+    }
     bin[l] = 0;
     return bin;
 }
 
-// ---------- Колбэки ----------
-size_t MainWindow::WriteHeaderCallback(void *contents, size_t size, size_t nmemb, void *userp)
+// ---------------------------------------------------------------------------
+// CALLBACKS CURL
+// ---------------------------------------------------------------------------
+size_t MainWindow::WriteHeaderCallback(void *contents, size_t size, size_t nmemb, void */*userp*/)
 {
-    char *p = (char *)contents;
-    size_t realsize = size * nmemb;
+    char *p = (char*)contents;
+    size_t len = size * nmemb;
 
-    if (!memcmp(p, "Content-Length:", 15)) ContLen = atoi(p + 15);
-    else if (!memcmp(p, "Set-Cookie:", 11))
-        sprintf(SessionID, "%*.*s", (int)(realsize - 2 - 11), (int)(realsize - 2 - 11), (p + 11));
-    else if (!memcmp(p, "__RequestVerificationToken:", 27))
-    {
-        int i; char *t;
-        t = strtok(p + 27, "#");
-        for (i = 0; t && i < 36; i++)
-        {
-            sprintf(Token[i], "__RequestVerificationToken:%32.32s", t);
-            t = strtok(NULL, "#");
+    if (len > 15 && !memcmp(p, "Content-Length:", 15))
+        ContLen = atoi(p + 15);
+    else if (len > 11 && !memcmp(p, "Set-Cookie:", 11))
+        snprintf(SessionID, sizeof(SessionID), "%.*s", (int)(len - 13), p + 12);
+    else if (len > 27 && !memcmp(p, "__RequestVerificationToken:", 27)) {
+        char *t = strtok(p + 27, "#");
+        for (int i = 0; t && i < 36; i++) {
+            snprintf(Token[i], sizeof(Token[i]), "__RequestVerificationToken:%s", t);
+            t = strtok(nullptr, "#");
         }
     }
-
-    return realsize;
+    return len;
 }
 
 size_t MainWindow::WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
 {
     size_t realsize = size * nmemb;
-    MemoryStruct *mem = (MemoryStruct *)userp;
+    MemoryStruct *mem = (MemoryStruct*)userp;
 
-    if ((mem->size + realsize) >= BuffSize) return realsize;
-    memcpy(&(mem->memory[mem->size]), contents, realsize);
+    if (mem->size + realsize >= BuffSize) return 0;          // защита от переполнения
+    memcpy(mem->memory + mem->size, contents, realsize);
     mem->size += realsize;
     mem->memory[mem->size] = 0;
     return realsize;
 }
 
-// ---------- Запросы ----------
-int MainWindow::GET(char *Url)
+// ---------------------------------------------------------------------------
+// HTTP-ЗАПРОСЫ
+// ---------------------------------------------------------------------------
+int MainWindow::GET(const char *Url)
 {
-    char URL[128];
-    sprintf(URL, MODEM "%s", Url);
-    curl_easy_setopt(ch, CURLOPT_URL, URL);
+    char url[256];
+    snprintf(url, sizeof(url), "%s%s", MODEM, Url);
+    curl_easy_setopt(ch, CURLOPT_URL, url);
     curl_easy_setopt(ch, CURLOPT_COOKIE, SessionID);
-    curl_easy_setopt(ch, CURLOPT_POST, 0);
+    curl_easy_setopt(ch, CURLOPT_POST, 0L);
     chunk.size = 0;
     res = curl_easy_perform(ch);
-    if (res != CURLE_OK) return 0;
-    return 1;
+    return (res == CURLE_OK);
 }
 
-int MainWindow::POST(char *post, char *Url)
+int MainWindow::POST(const char *post, const char *Url)
 {
-    char URL[128];
-    sprintf(URL, MODEM "%s", Url);
-    curl_easy_setopt(ch, CURLOPT_URL, URL);
-    curl_easy_setopt(ch, CURLOPT_POST, 1);
+    char url[256];
+    snprintf(url, sizeof(url), "%s%s", MODEM, Url);
+    curl_easy_setopt(ch, CURLOPT_URL, url);
     curl_easy_setopt(ch, CURLOPT_POSTFIELDS, post);
     curl_easy_setopt(ch, CURLOPT_COOKIE, SessionID);
+
     headers = nullptr;
     headers = curl_slist_append(headers, Token[0]);
     headers = curl_slist_append(headers, "Connection: keep-alive");
     curl_easy_setopt(ch, CURLOPT_HTTPHEADER, headers);
+
     chunk.size = 0;
     res = curl_easy_perform(ch);
-    if (res != CURLE_OK) return 0;
+
     curl_slist_free_all(headers);
     curl_easy_setopt(ch, CURLOPT_HTTPHEADER, nullptr);
-    return 1;
+    return (res == CURLE_OK);
 }
 
 int MainWindow::SesTokInfo()
 {
-    char *i, *f;
     if (!GET("/api/webserver/SesTokInfo")) return 0;
+    char *s = strstr(Buff, "<SesInfo>"), *e = strstr(Buff, "</SesInfo>");
+    if (!s || !e) return 0;
+    snprintf(SessionID, sizeof(SessionID), "%.*s", (int)(e - s - 9), s + 9);
 
-    i = strstr(Buff, "<SesInfo>");
-    f = strstr(Buff, "</SesInfo>");
-    if (!i || !f) return 0;
-    sprintf(SessionID, "%*.*s", (int)(f - i - 9), (int)(f - i - 9), i + 9);
-
-    i = strstr(Buff, "<TokInfo>");
-    f = strstr(Buff, "</TokInfo>");
-    if (!i || !f) return 0;
-    sprintf(Token[0], "__RequestVerificationToken:%*.*s", (int)(f - i - 9), (int)(f - i - 9), i + 9);
+    s = strstr(Buff, "<TokInfo>"); e = strstr(Buff, "</TokInfo>");
+    if (!s || !e) return 0;
+    snprintf(Token[0], sizeof(Token[0]), "__RequestVerificationToken:%.*s", (int)(e - s - 9), s + 9);
     return 1;
 }
 
-// ---------- SCRAM login ----------
-int MainWindow::login(char *user, char *password)
+// ---------------------------------------------------------------------------
+// АВТОРИЗАЦИЯ (SCRAM)
+// ---------------------------------------------------------------------------
+int MainWindow::login(const char *user, const char *password)
 {
-    unsigned int j;
-    unsigned char firstNonce[SHA256_DIGEST_LENGTH],
-        salt[SHA256_DIGEST_LENGTH],
-        saltPassword[SHA256_DIGEST_LENGTH],
-        storedkey[SHA256_DIGEST_LENGTH],
-        clientproof[SHA256_DIGEST_LENGTH],
-        clientKey[SHA256_DIGEST_LENGTH],
-        signature[SHA256_DIGEST_LENGTH];
-    char authMsg[2048];
-    char servernonce[1024];
-    char post[2048];
-    time_t rawtime = time(nullptr);
-    struct timespec TT;
-    SHA256_CTX ctx;
-
-    memset(Token, 0, sizeof(Token));
+    unsigned int outlen;
+    unsigned char salt[32], saltedPwd[32], clientKey[32], storedKey[32],
+                  clientProof[32], signature[32];
+    char post[2048], authMsg[2048], servernonce[256];
 
     curl_global_init(CURL_GLOBAL_ALL);
     ch = curl_easy_init();
     curl_easy_setopt(ch, CURLOPT_HEADERFUNCTION, WriteHeaderCallback);
-    curl_easy_setopt(ch, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-    curl_easy_setopt(ch, CURLOPT_CONNECTTIMEOUT, 5);
-    curl_easy_setopt(ch, CURLOPT_TIMEOUT, 5);
-    curl_easy_setopt(ch, CURLOPT_WRITEDATA, (void *)&chunk);
-    curl_easy_setopt(ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    curl_easy_setopt(ch, CURLOPT_WRITEFUNCTION,  WriteMemoryCallback);
+    curl_easy_setopt(ch, CURLOPT_WRITEDATA,      (void*)&chunk);
+    curl_easy_setopt(ch, CURLOPT_TIMEOUT,       8L);
+    curl_easy_setopt(ch, CURLOPT_CONNECTTIMEOUT,8L);
+    curl_easy_setopt(ch, CURLOPT_HTTP_VERSION,  CURL_HTTP_VERSION_1_1);
 
     if (!SesTokInfo()) return 0;
 
-    clock_gettime(CLOCK_MONOTONIC, &TT);
+    // firstNonce
+    unsigned char firstNonce[32];
+    SHA256_CTX ctx;
+    time_t t = time(nullptr);
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     SHA256_Init(&ctx);
-    SHA256_Update(&ctx, ctime(&rawtime), SHA256_DIGEST_LENGTH);
-    SHA256_Update(&ctx, bin2hex((unsigned char *)&TT, sizeof(TT)), SHA256_DIGEST_LENGTH);
+    SHA256_Update(&ctx, (unsigned char*)ctime(&t), 26);
+    SHA256_Update(&ctx, (unsigned char*)&ts, sizeof(ts));
     SHA256_Final(firstNonce, &ctx);
 
-    sprintf(post,
-            "<?xml version='1.0' encoding='UTF-8'?>\n"
-            "<request>\n"
-            "<username>%s</username>\n"
-            "<firstnonce>%s</firstnonce>\n"
-            "<mode>1</mode>\n"
-            "</request>",
-            user, bin2hex(firstNonce, SHA256_DIGEST_LENGTH));
+    snprintf(post, sizeof(post),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<request><username>%s</username><firstnonce>%s</firstnonce><mode>1</mode></request>",
+        user, bin2hex(firstNonce, 32));
 
     if (!POST(post, "/api/user/challenge_login")) return 0;
 
-    char *i = strstr(Buff, "<salt>");
-    char *f = strstr(Buff, "</salt>");
-    if (!i || !f) return 0;
-    sprintf(post, "%*.*s", (int)(f - i - 6), (int)(f - i - 6), i + 6);
-    memcpy(salt, hex2bin(post), SHA256_DIGEST_LENGTH);
+    // salt
+    char *p = strstr(Buff, "<salt>"); char *q = strstr(Buff, "</salt>");
+    if (!p || !q) return 0;
+    memcpy(salt, hex2bin(strncpy(post, p+6, q-p-6)), 32);
 
-    i = strstr(Buff, "<servernonce>");
-    f = strstr(Buff, "</servernonce>");
-    if (!i || !f) return 0;
-    sprintf(servernonce, "%*.*s", (int)(f - i - 13), (int)(f - i - 13), i + 13);
+    // servernonce
+    p = strstr(Buff, "<servernonce>"); q = strstr(Buff, "</servernonce>");
+    if (!p || !q) return 0;
+    strncpy(servernonce, p+13, q-p-13); servernonce[q-p-13] = 0;
 
-    unsigned int La = sprintf(authMsg, "%s,%s,%s", bin2hex(firstNonce, SHA256_DIGEST_LENGTH), servernonce, servernonce);
+    // authMsg
+    int alen = snprintf(authMsg, sizeof(authMsg), "%s,%s,%s",
+                        bin2hex(firstNonce,32), servernonce, servernonce);
 
-    PKCS5_PBKDF2_HMAC(password, strlen(password), (const unsigned char *)salt, SHA256_DIGEST_LENGTH, 100, EVP_sha256(), SHA256_DIGEST_LENGTH, saltPassword);
-    HMAC(EVP_sha256(), (const unsigned char *)"Client Key", 10, saltPassword, SHA256_DIGEST_LENGTH, clientKey, &j);
-    SHA256_Init(&ctx);
-    SHA256_Update(&ctx, clientKey, SHA256_DIGEST_LENGTH);
-    SHA256_Final(storedkey, &ctx);
-    HMAC(EVP_sha256(), (const unsigned char *)authMsg, La, storedkey, SHA256_DIGEST_LENGTH, signature, &j);
-    for (j = 0; j < SHA256_DIGEST_LENGTH; j++) clientproof[j] = clientKey[j] ^ signature[j];
+    // SaltedPassword
+    PKCS5_PBKDF2_HMAC(password, strlen(password), salt, 32, 100,
+                      EVP_sha256(), 32, saltedPwd);
 
-    sprintf(post,
-            "<?xml version='1.0' encoding='UTF-8'?>\n"
-            "<request>\n"
-            "<clientproof>%s</clientproof>\n"
-            "<finalnonce>%s</finalnonce>\n"
-            "</request>\n",
-            bin2hex(clientproof, SHA256_DIGEST_LENGTH), servernonce);
+    // ClientKey → StoredKey
+    HMAC(EVP_sha256(), "Client Key", 10, saltedPwd, 32, clientKey, &outlen);
+    SHA256(clientKey, 32, storedKey);
+
+    // Signature
+    HMAC(EVP_sha256(), authMsg, alen, storedKey, 32, signature, &outlen);
+
+    // ClientProof
+    for (int i = 0; i < 32; i++) clientProof[i] = clientKey[i] ^ signature[i];
+
+    // final request
+    snprintf(post, sizeof(post),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<request><clientproof>%s</clientproof><finalnonce>%s</finalnonce></request>",
+        bin2hex(clientProof,32), servernonce);
 
     if (!POST(post, "/api/user/authentication_login")) return 0;
     if (!GET("/api/user/state-login")) return 0;
-    if (!strstr(Buff, "<State>0</State>")) return 0;
-    return 1;
+    return (strstr(Buff, "<State>0</State>") != nullptr);
 }
 
 int MainWindow::logout()
 {
-    char *post =
-        "<?xml version='1.0' encoding='UTF-8'?>\n"
-        "<request>\n"
-        "<Logout>1</Logout>\n"
-        "</request>\n";
-
-    if (!POST(post, "/api/user/logout")) return 0;
-    curl_easy_cleanup(ch);
+    const char *post = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Logout>1</Logout></request>";
+    POST(post, "/api/user/logout");
+    if (ch) { curl_easy_cleanup(ch); ch = nullptr; }
     curl_global_cleanup();
-    ch = nullptr;
-    if (!strstr(Buff, "<response>OK</response>")) return 0;
     return 1;
 }
 
-char *MainWindow::ListSmsIn()
+// ---------------------------------------------------------------------------
+// SMS
+// ---------------------------------------------------------------------------
+char* MainWindow::ListSmsIn()
 {
-    char post[] =
-        "<?xml version='1.0' encoding='UTF-8'?>\n"
-        "<request>\n"
-        "<PageIndex>1</PageIndex>\n"
-        "<ReadCount>20</ReadCount>\n"
-        "<BoxType>1</BoxType>\n"
-        "<SortType>0</SortType>\n"
-        "<Ascending>0</Ascending>\n"
-        "<UnreadPreferred>0</UnreadPreferred>\n"
-        "</request>";
+    const char *post =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<request><PageIndex>1</PageIndex><ReadCount>50</ReadCount>"
+        "<BoxType>1</BoxType><SortType>0</SortType><Ascending>0</Ascending>"
+        "<UnreadPreferred>0</UnreadPreferred></request>";
 
     if (!POST(post, "/api/sms/sms-list")) return nullptr;
     return Buff;
+}
+
+bool MainWindow::DeleteSms(int smsIndex)
+{
+    char post[256];
+    snprintf(post, sizeof(post),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<request><Index>%d</Index></request>", smsIndex);
+
+    if (!POST(post, "/api/sms/delete-sms")) return false;
+    return (strstr(Buff, "<response>OK</response>") != nullptr);
+}
+
+bool MainWindow::DeleteAllSms()
+{
+    char *data = ListSmsIn();
+    if (!data) return false;
+
+    XMLDocument doc;
+    if (doc.Parse(data) != XML_SUCCESS) return false;
+
+    XMLElement *messages = doc.FirstChildElement("response")
+                                ->FirstChildElement("Messages");
+    if (!messages) return true;   // уже пусто
+
+    std::vector<int> idxs;
+    for (XMLElement *msg = messages->FirstChildElement("Message"); msg; msg = msg->NextSiblingElement("Message")) {
+        XMLElement *idxEl = msg->FirstChildElement("Index");
+        if (idxEl && idxEl->GetText()) idxs.push_back(atoi(idxEl->GetText()));
+    }
+
+    bool allOk = true;
+    for (int i : idxs)
+        if (!DeleteSms(i)) allOk = false;
+
+    return allOk;
 }
 
 QString MainWindow::parseSmsXml(const char *xmlData)
 {
     QString result;
     XMLDocument doc;
+    if (doc.Parse(xmlData) != XML_SUCCESS) return "Ошибка парсинга XML";
 
-    // Парсим XML данные
-    if (doc.Parse(xmlData) != XML_SUCCESS) {
-        return "Ошибка парсинга XML.\n";
+    XMLElement *resp = doc.FirstChildElement("response");
+    if (!resp) return "Нет <response>";
+
+    XMLElement *msgs = resp->FirstChildElement("Messages");
+    if (!msgs || !msgs->FirstChildElement("Message"))
+        return "Входящих SMS нет";
+
+    for (XMLElement *m = msgs->FirstChildElement("Message"); m; m = m->NextSiblingElement("Message")) {
+        const char *phone = m->FirstChildElement("Phone")   ? m->FirstChildElement("Phone")->GetText()   : "неизвестно";
+        const char *date  = m->FirstChildElement("Date")    ? m->FirstChildElement("Date")->GetText()    : "";
+        const char *text  = m->FirstChildElement("Content") ? m->FirstChildElement("Content")->GetText() : "";
+
+        result += QString("От: %1\nДата: %2\n%3\n\n")
+                     .arg(phone).arg(date).arg(text);
     }
-
-    XMLElement *response = doc.FirstChildElement("response");
-    if (!response) return "Нет тегов <response> в XML.\n";
-
-    XMLElement *messages = response->FirstChildElement("Messages");
-    if (!messages) return "Нет входящих сообщений.\n";
-
-    XMLElement *sms = messages->FirstChildElement("Message");
-    while (sms) {
-        const char *phone = sms->FirstChildElement("Phone") ? sms->FirstChildElement("Phone")->GetText() : "Неизвестно";
-        const char *date = sms->FirstChildElement("Date") ? sms->FirstChildElement("Date")->GetText() : "";
-        const char *content = sms->FirstChildElement("Content") ? sms->FirstChildElement("Content")->GetText() : "";
-
-        // Формируем строку результата
-        result += QString("📱 От: %1\n🕓 Дата: %2\n💬 Сообщение:\n%3\n\n")
-                      .arg(phone)
-                      .arg(date)
-                      .arg(content);
-
-        sms = sms->NextSiblingElement("Message");  // Переход к следующему сообщению
-    }
-
-    if (result.isEmpty()) result = "Нет входящих SMS.";
-    return result;
+    return result.trimmed();
 }
 
-
-// ---------- GUI ----------
-MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(nullptr)
+// ---------------------------------------------------------------------------
+// GUI
+// ---------------------------------------------------------------------------
+MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
-    // Устанавливаем иконку
-    setWindowIcon(QIcon(":/resources/resources/sms.png"));  // Убедитесь, что путь правильный
+    setWindowTitle("Huawei SMS Gateway");
+    setWindowIcon(QIcon(":/resources/resources/sms.png"));
 
-    QWidget *w = new QWidget;
-    QVBoxLayout *lay = new QVBoxLayout(w);
+    QWidget *central = new QWidget(this);
+    QVBoxLayout *vlay = new QVBoxLayout(central);
 
-    // Убираем поля для ввода логина и пароля
-    // lineUser = new QLineEdit; lineUser->setPlaceholderText("Username");
-    // linePass = new QLineEdit; linePass->setPlaceholderText("Password"); linePass->setEchoMode(QLineEdit::Password);
+    // SMS-текст
+    textSms = new QTextEdit;
+    textSms->setReadOnly(true);
+    textSms->setFont(QFont("Consolas", 10));
+    textSms->setPlaceholderText("Список SMS появится здесь...");
 
-    btnLogin = new QPushButton("Login");
-    textSms = new QTextEdit; textSms->setPlaceholderText("SMS list will appear here...");
+    // Кнопки
+    btnGetSms       = new QPushButton("Получить SMS");
+    btnDeleteAll    = new QPushButton("Удалить все SMS");
+    btnRefreshToken = new QPushButton("Переподключиться");
 
-    lay->addWidget(btnLogin);
-    lay->addWidget(textSms);
+    // Стили
+    btnGetSms->setStyleSheet(
+        "QPushButton { background:#4CAF50; color:white; font-weight:bold; border-radius:8px; padding:12px; }"
+        "QPushButton:pressed { background:#45a049; }");
+    btnDeleteAll->setStyleSheet(
+        "QPushButton { background:#f44336; color:white; font-weight:bold; border-radius:8px; padding:12px; }"
+        "QPushButton:pressed { background:#d32f2f; }");
+    btnRefreshToken->setStyleSheet(
+        "QPushButton { background:#2196F3; color:white; font-weight:bold; border-radius:8px; padding:12px; }"
+        "QPushButton:pressed { background:#1976D2; }");
 
-    setCentralWidget(w);
-    QRect screenGeometry = QGuiApplication::primaryScreen()->availableGeometry();
-    int x = (screenGeometry.width() - width()) / 2;
-    int y = (screenGeometry.height() - height()) / 2;
-    move(x, y);
-    connect(btnLogin, &QPushButton::clicked, this, &MainWindow::on_pushButton_clicked);
+    // Статус
+    labelStatus = new QLabel("Готов");
+    labelStatus->setAlignment(Qt::AlignCenter);
+    labelStatus->setStyleSheet("color:#777; font-style:italic; padding:8px;");
+
+    // Горизонтальная строка кнопок
+    QHBoxLayout *btnLay = new QHBoxLayout;
+    btnLay->addWidget(btnGetSms);
+    btnLay->addWidget(btnDeleteAll);
+    btnLay->addWidget(btnRefreshToken);
+
+    vlay->addWidget(textSms);
+    vlay->addLayout(btnLay);
+    vlay->addWidget(labelStatus);
+    vlay->setContentsMargins(20,20,20,20);
+    vlay->setSpacing(15);
+
+    setCentralWidget(central);
+    resize(860, 680);
+
+    // Центрируем окно
+    QRect scr = QGuiApplication::primaryScreen()->availableGeometry();
+    move((scr.width()  - width())  / 2,
+         (scr.height() - height()) / 2);
+
+    // Сигналы
+    connect(btnGetSms,       &QPushButton::clicked, this, &MainWindow::on_btnGetSms_clicked);
+    connect(btnDeleteAll,    &QPushButton::clicked, this, &MainWindow::on_btnDeleteAll_clicked);
+    connect(btnRefreshToken, &QPushButton::clicked, this, &MainWindow::on_btnRefreshToken_clicked);
 }
 
-MainWindow::~MainWindow() {}
+MainWindow::~MainWindow() { logout(); }
 
-void MainWindow::on_pushButton_clicked()
+// ---------------------------------------------------------------------------
+// СЛОТЫ
+// ---------------------------------------------------------------------------
+void MainWindow::on_btnGetSms_clicked()
 {
-    QByteArray u = "admin";  // Логин всегда "admin"
-    QByteArray p = "admin";  // Пароль всегда "admin"
+    labelStatus->setText("Вход в модем...");
+    btnGetSms->setEnabled(false);
+    textSms->clear();
 
-    system("doas service ipfw stop");
+    system("doas service ipfw stop 2>/dev/null || true");
 
-    if (login(u.data(), p.data())) {
-        // Remove the success message box
-        // QMessageBox::information(this, "Login", "Успешный вход!");
-        
-        char *sms = ListSmsIn();
-        if (sms) {
-            // Парсим XML и отображаем SMS
-            QString parsedMessages = parseSmsXml(sms);
-            textSms->setText(parsedMessages);
+    if (login("admin", "admin")) {
+        char *data = ListSmsIn();
+        if (data) {
+            textSms->setText(parseSmsXml(data));
+            labelStatus->setText("SMS получены");
         } else {
-            QMessageBox::warning(this, "Ошибка", "Не удалось получить SMS.");
+            textSms->setText("Не удалось получить список SMS");
+            labelStatus->setText("Ошибка получения SMS");
         }
     } else {
-        QMessageBox::critical(this, "Ошибка", "Ошибка входа. Проверьте логин/пароль.");
+        textSms->setText("Ошибка авторизации!\nПроверьте подключение к модему.");
+        labelStatus->setText("Не удалось войти");
     }
 
-    system("doas service ipfw start");
+    system("doas service ipfw start 2>/dev/null || true");
+    btnGetSms->setEnabled(true);
+}
+
+void MainWindow::on_btnDeleteAll_clicked()
+{
+    auto r = QMessageBox::question(this, "Удаление",
+        "Удалить ВСЕ входящие SMS?\n\nЭто действие необратимо!", QMessageBox::Yes|QMessageBox::No);
+    if (r != QMessageBox::Yes) return;
+
+    btnDeleteAll->setEnabled(false);
+    btnDeleteAll->setText("Удаление...");
+    labelStatus->setText("Удаление сообщений...");
+
+    bool ok = DeleteAllSms();
+
+    btnDeleteAll->setText("Удалить все SMS");
+    btnDeleteAll->setEnabled(true);
+
+    if (ok) {
+        textSms->setText("Все SMS успешно удалены.");
+        labelStatus->setText("Готово — всё удалено");
+    } else {
+        QMessageBox::warning(this, "Ошибка", "Не все сообщения удалось удалить.");
+        labelStatus->setText("Ошибка удаления");
+    }
+
+    on_btnGetSms_clicked();   // обновляем список
+}
+
+void MainWindow::on_btnRefreshToken_clicked()
+{
+    labelStatus->setText("Переподключение...");
+    logout();
+    if (login("admin", "admin"))
+        labelStatus->setText("Переподключено успешно");
+    else
+        labelStatus->setText("Ошибка переподключения");
 }
