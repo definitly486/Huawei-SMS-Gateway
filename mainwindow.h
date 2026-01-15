@@ -35,6 +35,7 @@ public:
 
 private slots:
     void on_pushButton_clicked();
+    void doAutoLogin();
 
 private:
     Ui::MainWindow *ui;

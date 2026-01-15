@@ -3,3 +3,15 @@
 /Makefile
 /huaweismsgateway
 /modem_sms
+/main.o
+/mainwindow.o
+/.qmake.stash
+/main.o
+/mainwindow.o
+/moc_mainwindow.o
+/.qtc_clangd/*
+/moc_mainwindow.cpp
+/moc_predefs.h
+/qrc_resources.cpp
+/qrc_resources.o
+/ui_mainwindow.h

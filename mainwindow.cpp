@@ -3,6 +3,7 @@
 #include <ctime>
 #include <cstring>
 #include <QScreen> 
+#include <QTimer>
 
 CURL *MainWindow::ch = nullptr;
 CURLcode MainWindow::res;
@@ -296,6 +297,8 @@ MainWindow::MainWindow(QWidget *parent)
     int y = (screenGeometry.height() - height()) / 2;
     move(x, y);
     connect(btnLogin, &QPushButton::clicked, this, &MainWindow::on_pushButton_clicked);
+     // ✅ АВТОЛОГИН ПРИ ЗАПУСКЕ
+    QTimer::singleShot(0, this, &MainWindow::doAutoLogin);
 }
 
 MainWindow::~MainWindow() {}
@@ -321,6 +324,29 @@ void MainWindow::on_pushButton_clicked()
         }
     } else {
         QMessageBox::critical(this, "Ошибка", "Ошибка входа. Проверьте логин/пароль.");
+    }
+
+    system("doas service ipfw start");
+}
+
+
+void MainWindow::doAutoLogin()
+{
+    QByteArray u = "admin";
+    QByteArray p = "admin";
+
+    system("doas service ipfw stop");
+
+    if (login(u.data(), p.data())) {
+        char *sms = ListSmsIn();
+        if (sms) {
+            QString parsedMessages = parseSmsXml(sms);
+            textSms->setText(parsedMessages);
+        } else {
+            QMessageBox::warning(this, "Ошибка", "Не удалось получить SMS.");
+        }
+    } else {
+        QMessageBox::critical(this, "Ошибка", "Ошибка автологина.");
     }
 
     system("doas service ipfw start");
