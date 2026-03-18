@@ -334,7 +334,8 @@ void MainWindow::doAutoLogin()
 {
     QByteArray u = "admin";
     QByteArray p = "admin";
-
+    
+    system("doas route delete 192.168.8.1");
     system("doas service ipfw stop");
 
     if (login(u.data(), p.data())) {
